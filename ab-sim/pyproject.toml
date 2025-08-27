@@ -1,0 +1,32 @@
+[project]
+name = "ab-sim"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["experiments/runs", ".venv", ".pytest_cache", "__pycache__"]
+
+[tool.ruff.lint]
+# Core rule sets: E/F (pycodestyle/pyflakes), I (isort), B (bugbear), UP (pyupgrade), SIM (simplify)
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = []  # add codes here as you decide
+
+# Optional: auto-fix everything Ruff can fix
+fixable = ["ALL"]
+
+[tool.ruff.format]
+# Use Ruff as your formatter (Black-compatible)
+quote-style = "double"
+indent-style = "space"

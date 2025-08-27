@@ -1,0 +1,8 @@
+/.vscode
+.python-version
+uv.lock
+*.pytest_cache/
+*.ruff_cache/
+*.venv/
+__pycache__/
+*.egg-info/
