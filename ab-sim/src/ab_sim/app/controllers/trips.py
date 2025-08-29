@@ -22,9 +22,9 @@ from ab_sim.domain.entities.driver import Driver
 from ab_sim.domain.entities.motion import MovePlan, MoveTask
 from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.state import TripState, WorldState
-from ab_sim.policy.assign import MatchingPolicy
+from ab_sim.policy.matching import MatchingPolicy
 from ab_sim.policy.pricing import PricingPolicy
-from ab_sim.policy.travel_time import FixedSpeedModel
+from ab_sim.services.travel_time import TravelTimeService
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.metrics import Metrics
 
@@ -33,8 +33,8 @@ class TripHandler:
     def __init__(
         self,
         world: WorldState,
-        matcher: MatchingPolicy,
-        speeds: FixedSpeedModel,
+        matching: MatchingPolicy,
+        travel_time: TravelTimeService,
         clock: SimClock,
         rng,
         pricing: PricingPolicy,
@@ -44,7 +44,7 @@ class TripHandler:
         dwell=None,
     ):
         self.world = world
-        self.speeds = speeds
+        self.travel_time = travel_time
         self.mechanics = mechanics
         self.clock = clock
         self.rng = rng
@@ -264,7 +264,7 @@ class TripHandler:
             d.motion = plan
             t_arr = plan.end_t
         else:
-            dur = self.speeds.duration_to_dropoff(d, trip, now)
+            dur = self.travel_time.duration_to_dropoff(d, trip, now)
             d.motion = MovePlan(
                 tasks=[MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=now + dur)],
                 total_length_m=((trip.dest.x - d.loc.x) ** 2 + (trip.dest.y - d.loc.y) ** 2) ** 0.5,

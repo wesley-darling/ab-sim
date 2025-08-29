@@ -1,16 +1,12 @@
 # ab_sim/policy/assign.py
 from dataclasses import dataclass
 
+from ab_sim.app.protocols import MatchingPolicy
 from ab_sim.domain.state import WorldState
 
 
 @dataclass
-class MatchingPolicy:
-    world: WorldState
-
-
-@dataclass
-class NearestAssign(MatchingPolicy):
+class NearestAssignMatchingPolicy(MatchingPolicy):
     world: WorldState
 
     # Example # Emit business-only enrichment (does not affect sim)

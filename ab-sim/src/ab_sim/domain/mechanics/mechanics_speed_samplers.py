@@ -1,17 +1,30 @@
 import math
+from typing import Literal
 
-from ab_sim.app.protocols import SpeedModel
+from ab_sim.app.protocols import SpeedSampler
 
 
-class GlobalSpeed(SpeedModel):
+class GlobalSpeedSampler(SpeedSampler):
     def __init__(self, v_mps: float):
-        self.v = v_mps
+        self.v_mps = v_mps
 
     def speed_mps(self, t: float, **_):
-        return self.v
+        return self.v_mps
 
 
-class DistDrawSpeed(SpeedModel):
+class ConstantSpeedSampler(SpeedSampler):
+    def __init__(self, pickup_mps: float, dropoff_mps: float):
+        self.pickup_mps = pickup_mps
+        self.dropoff_mps = dropoff_mps
+
+    def speed_mps(self, t: float, trip_leg: Literal["pickup", "dropoff"], **_):
+        if trip_leg == "pickup":
+            return self.pickup_mps
+        if trip_leg == "dropoff":
+            return self.pickup_mps
+
+
+class DistDrawSpeedSampler(SpeedSampler):
     def __init__(self, rng, dist: str, params: dict[str, float], fallback_mps: float):
         self.rng, self.dist, self.p, self.fb = rng, dist, params, fallback_mps
 
@@ -28,7 +41,7 @@ class DistDrawSpeed(SpeedModel):
         return self.fb
 
 
-class EdgeAwareSpeed(SpeedModel):
+class EdgeAwareSpeedSampler(SpeedSampler):
     def __init__(self, base_mps: float, tfac: dict[str, float], efac: dict[int, float]):
         self.base, self.tfac, self.efac = base_mps, tfac, efac
 

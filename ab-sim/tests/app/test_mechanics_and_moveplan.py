@@ -9,12 +9,12 @@ from ab_sim.domain.entities.driver import Driver
 from ab_sim.domain.entities.motion import MoveTask  # for compatibility checks
 from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.mechanics.mechanics_factory import (
-    GlobalSpeed,
-    ManhattanRouter,
+    GlobalSpeedSampler,
+    ManhattanRoutePlanner,
     MechanicsConfig,
     build_mechanics,
 )
-from ab_sim.domain.mechanics.mechanics_movers import PiecewiseConstSpeedMover
+from ab_sim.domain.mechanics.mechanics_path_traversers import PiecewiseConstSpeedTraverser
 from ab_sim.io.config import ScenarioConfig
 from ab_sim.sim.rng import RNGRegistry
 
@@ -51,7 +51,7 @@ def mechanics_ideal_const8() -> Mechanics:
     return build_mechanics(cfg, rng_registry=reg)
 
 
-# ---------- Core Mechanics / Mover tests
+# ---------- Core Mechanics / Traverser tests
 
 
 def test_euclidean_eta_equals_length_over_speed(mechanics_ideal_const10: Mechanics):
@@ -74,7 +74,7 @@ def test_move_plan_matches_eta_and_linear_pos(mechanics_ideal_const10: Mechanics
 def test_manhattan_router_two_segments_and_durations(mechanics_ideal_const8: Mechanics):
     # Swap router to Manhattan explicitly to check segmenting behavior if fixture isn't already
     m = mechanics_ideal_const8
-    m.router = ManhattanRouter()
+    m.router = ManhattanRoutePlanner()
 
     a, b, t0 = Point(0.0, 0.0), Point(300.0, 400.0), 0.0
     path = m.route(a, b)
@@ -154,7 +154,7 @@ def test_driver_motion_plan_and_current_move_compat(mechanics_ideal_const10: Mec
 # ---------- Edge-aware speed: walking (edge_id=None) vs driving
 
 
-class _WalkDriveSpeed(GlobalSpeed):
+class _WalkDriveSpeed(GlobalSpeedSampler):
     """Base=drive speed; return slower speed if edge_id is None (walking)."""
 
     def __init__(self, drive_mps=10.0, walk_mps=1.0):
@@ -166,7 +166,7 @@ class _WalkDriveSpeed(GlobalSpeed):
 
 
 def test_plan_with_walking_and_driving_segments():
-    mover = PiecewiseConstSpeedMover()
+    mover = PiecewiseConstSpeedTraverser()
     speed = _WalkDriveSpeed(drive_mps=10.0, walk_mps=1.0)
 
     # Build a path: 100 m walk (edge_id=None) then 900 m drive (edge_id=7)

@@ -1,10 +1,10 @@
 import math
 
-from ab_sim.app.protocols import Router
+from ab_sim.app.protocols import RoutePlanner
 from ab_sim.domain.entities.geography import NetworkGraph, Path, Point, Segment
 
 
-class EuclidRouter(Router):
+class EuclidRoutePlanner(RoutePlanner):
     def route(self, a, b):
         L = math.hypot(b.x - a.x, b.y - a.y)
         return Path([Segment(a, b, L)], L)
@@ -13,7 +13,7 @@ class EuclidRouter(Router):
         return math.hypot(b.x - a.x, b.y - a.y)
 
 
-class ManhattanRouter(Router):
+class ManhattanRoutePlanner(RoutePlanner):
     def route(self, a, b):
         dx, dy = b.x - a.x, b.y - a.y
         p1 = Point(b.x, a.y)
@@ -24,7 +24,7 @@ class ManhattanRouter(Router):
         return abs(b.x - a.x) + abs(b.y - a.y)
 
 
-class NetworkRouter(Router):
+class NetworkRoutePlanner(RoutePlanner):
     def __init__(self, graph: NetworkGraph, vmax_mps: float = 16.7):
         self.G, self.vmax = graph, vmax_mps
 

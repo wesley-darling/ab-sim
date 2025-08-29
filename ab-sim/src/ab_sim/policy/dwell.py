@@ -1,10 +1,11 @@
 # ab_sim/policy/dwells.py
 import numpy as np
 
+from ab_sim.app.protocols import DwellPolicy
 from ab_sim.sim.rng import RNGRegistry
 
 
-class DwellModel:
+class ExpBoardingAlightingPolicy(DwellPolicy):
     def __init__(self, rng: RNGRegistry, board_mean_s=7.0, alight_mean_s=5.0):
         self.rng = rng
         self.board_mean_s = board_mean_s

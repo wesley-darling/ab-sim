@@ -1,10 +1,10 @@
 import math
 
-from ab_sim.app.protocols import GeoSpace
+from ab_sim.app.protocols import OriginDestinationSampler
 from ab_sim.domain.entities.geography import NetworkGraph, Point, Segment
 
 
-class IdealizedGeo(GeoSpace):
+class IdealizedODSampler(OriginDestinationSampler):
     def __init__(
         self,
         *,
@@ -36,7 +36,7 @@ class IdealizedGeo(GeoSpace):
 
 
 # -------- Empirical polygon sampler (#!stub)
-class EmpiricalGeo(GeoSpace):
+class EmpiricalODSampler(OriginDestinationSampler):
     def __init__(self, *, sampler, rng):  # sampler.sample(rng)->Point in meters CRS
         self.sampler, self.rng = sampler, rng
 
@@ -50,7 +50,7 @@ class EmpiricalGeo(GeoSpace):
         return p, None
 
 
-class NetworkGeo(GeoSpace):
+class NetworkODSampler(OriginDestinationSampler):
     def __init__(self, *, graph: NetworkGraph, rng_snap):
         self.G, self.rng = graph, rng_snap
 

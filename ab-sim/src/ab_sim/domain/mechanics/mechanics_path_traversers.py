@@ -1,7 +1,7 @@
 import math
 from collections.abc import Iterable
 
-from ab_sim.app.protocols import Mover, SpeedModel
+from ab_sim.app.protocols import PathTraverser, SpeedSampler
 from ab_sim.domain.entities.geography import Path, Point
 from ab_sim.domain.entities.motion import MovePlan, MoveTask
 
@@ -16,16 +16,16 @@ def start_move(now: float, loc: Point, dest: Point, speed_mps: float) -> MoveTas
     return MoveTask(start=loc, end=dest, start_t=now, end_t=now + eta(loc, dest, speed_mps))
 
 
-class PiecewiseConstSpeedMover(Mover):
-    def eta_s(self, path: Path, t0: float, speed: SpeedModel, **kw) -> float:
+class PiecewiseConstSpeedTraverser(PathTraverser):
+    def eta_s(self, path: Path, t0: float, speed: SpeedSampler, **kw) -> float:
         t = t0
         for seg in path.segments:
             v = max(0.1, speed.speed_mps(t, edge_id=seg.edge_id, **kw))
             t += seg.length_m / v
         return t
 
-    def next_progress_event(
-        self, path: Path, t0: float, speed: SpeedModel, step_m: float = 50.0, **kw
+    def checkpoints(
+        self, path: Path, t0: float, speed: SpeedSampler, step_m: float = 50.0, **kw
     ) -> Iterable[tuple[float, Point]]:
         t = t0
         for seg in path.segments:
@@ -50,7 +50,7 @@ class PiecewiseConstSpeedMover(Mover):
         self,
         path: Path,
         t0: float,
-        speed: SpeedModel,
+        speed: SpeedSampler,
         dow: int | None = None,
         hour: int | None = None,
     ) -> MovePlan:

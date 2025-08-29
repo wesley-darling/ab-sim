@@ -2,14 +2,15 @@
 from ab_sim.app.controllers.demand import DemandHandler
 from ab_sim.app.controllers.fleet import FleetHandler
 from ab_sim.app.controllers.idle import IdleHandler, IdlePolicy
-from ab_sim.app.controllers.trips import FixedSpeedModel, TripHandler
+from ab_sim.app.controllers.trips import TripHandler
 from ab_sim.app.events import RiderCancel, RiderRequestPlaced
 from ab_sim.app.wiring import wire
+from ab_sim.config.mechanics import MechanicsModel
 from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.domain.state import Driver, WorldState
-from ab_sim.io.config import MechanicsConfig
-from ab_sim.policy.assign import NearestAssign
+from ab_sim.policy.matching import NearestAssign
 from ab_sim.policy.pricing import PricingPolicy
+from ab_sim.services.travel_time import FixedDurationTravelTime
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.hooks import NoopHooks
 from ab_sim.sim.kernel import Kernel
@@ -43,26 +44,31 @@ def build_app(pickup_s=10.0, dropoff_s=20.0, board_s=5.0, alight_s=3.0):
     world = WorldState()
     # one idle driver at (0,0)
     world.add_driver(Driver(id=1, loc=(0.0, 0.0)))
-    mech_cfg = MechanicsConfig(
-        mode="idealized",
-        metric="euclidean",
-        speed_kind="constant",
-        base_mps=max(pickup_s, dropoff_s),
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 0,
+            "od_sampler": {"kind": "idealized", "zones": [(0, 0, 10_000, 10_000)]},
+            "route_planner": {"kind": "euclidean"},
+            "speed_sampler": {"kind": "constant", "v_mps": max(pickup_s, dropoff_s)},
+            "path_traverser": {"kind": "piecewise_const", "step_m": 50.0},
+        }
     )
     mechanics = build_mechanics(
         mech_cfg, rng_registry=RNGRegistry(master_seed=0, scenario="tests", worker=0)
     )
     clock = SimClock.utc_epoch(2025, 1, 1, 0, 0, 0)
-    speeds = FixedSpeedModel(pickup_s=pickup_s, dropoff_s=dropoff_s)
+    travel_time = FixedDurationTravelTime(
+        pickup_s=pickup_s, dropoff_s=dropoff_s, reposition_s=max(pickup_s, dropoff_s)
+    )
     dwell = FixedDwell(board_s=board_s, alight_s=alight_s)
     rng_registry = RNGRegistry(master_seed=0)
     trips = TripHandler(
         world=world,
-        speeds=speeds,
+        travel_time=travel_time,
         mechanics=mechanics,
         max_driver_wait_s=300.0,
         dwell=dwell,
-        matcher=NearestAssign(world),
+        matching=NearestAssign(world),
         clock=clock,
         rng=rng_registry,
         pricing=PricingPolicy(0),
@@ -71,9 +77,9 @@ def build_app(pickup_s=10.0, dropoff_s=20.0, board_s=5.0, alight_s=3.0):
     demand = DemandHandler(world=world, rng=rng_registry, mechanics=mechanics)
     idle = IdleHandler(
         world=world,
-        policy=IdlePolicy(dwell_s=0.0),
+        idle_policy=IdlePolicy(dwell_s=0.0),
         demand=demand,
-        speeds=speeds,
+        travel_time=travel_time,
         mechanics=mechanics,
         clock=clock,
     )

@@ -1,4 +1,5 @@
 # ab_sim/app/build.py
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ab_sim.app.controllers.demand import DemandHandler
@@ -7,6 +8,7 @@ from ab_sim.app.controllers.idle import IdleHandler
 from ab_sim.app.controllers.trips import TripHandler
 from ab_sim.app.events import EndOfDay
 from ab_sim.app.wiring import wire
+from ab_sim.config.models import ScenarioModel
 from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 
@@ -15,8 +17,14 @@ from ab_sim.domain.state import WorldState
 from ab_sim.io.config import ScenarioConfig
 from ab_sim.io.kernel_logging import KernelLogging  # JSON logs
 from ab_sim.io.recorder import JsonlSink, Recorder
-from ab_sim.policy.assign import NearestAssign
-from ab_sim.policy.travel_time import FixedSpeedModel
+from ab_sim.runtime.policy_factory import (
+    make_dwell_policy,
+    make_idle_policy,
+    make_matching_policy,
+    make_pricing_policy,
+)
+from ab_sim.runtime.services_factory import make_travel_time
+from ab_sim.services.travel_time import TravelTimeService
 from ab_sim.sim.clock import DAY, SimClock
 from ab_sim.sim.hooks import NoopHooks
 from ab_sim.sim.kernel import Kernel
@@ -36,10 +44,13 @@ class App:
     fleet: FleetHandler
 
 
-def build(cfg: ScenarioConfig, *, worker: int = 0, use_logging: bool = True) -> App:
+def build(cfg: ScenarioConfig | Mapping, *, worker: int = 0, use_logging: bool = True) -> App:
+    # 0) Validate config
+    model = cfg if isinstance(cfg, ScenarioModel) else ScenarioModel.model_validate(cfg)
+
     # 1) Clock & RNG
-    clock = SimClock.utc_epoch(*cfg.sim.epoch)  # e.g., [2024, 1, 1, 0, 0, 0]
-    rng_registry = RNGRegistry(cfg.sim.seed, scenario=cfg.name, worker=worker)
+    clock = SimClock.utc_epoch(*model.sim.epoch)  # e.g., [2024, 1, 1, 0, 0, 0]
+    rng_registry = RNGRegistry(model.sim.seed, scenario=model.name, worker=worker)
 
     # 2) Kernel (with hooks)
 
@@ -49,12 +60,12 @@ def build(cfg: ScenarioConfig, *, worker: int = 0, use_logging: bool = True) -> 
 
     hooks = (
         KernelLogging(
-            run_id=cfg.run_id,
+            run_id=model.run_id,
             recorder=recorder,
             clock=clock,
-            level=cfg.log.level,
-            debug=cfg.log.debug,
-            sample_every=cfg.log.sample_every,
+            level=model.log.level,
+            debug=model.log.debug,
+            sample_every=model.log.sample_every,
         )
         if use_logging
         else NoopHooks()
@@ -62,27 +73,37 @@ def build(cfg: ScenarioConfig, *, worker: int = 0, use_logging: bool = True) -> 
     kernel = Kernel(hooks=hooks)
 
     # 3) World & policies
-    world = WorldState(capacity=cfg.world.capacity, geo=cfg.world.geo)
-    assign = NearestAssign(world=world)  # deterministic, can still dip into rng.stream("policy")
-    speeds = FixedSpeedModel(pickup_s=cfg.speeds.pickup_mps, dropoff_s=cfg.speeds.drop_mps)
-    mechanics = build_mechanics(cfg.mechanics, rng_registry=rng_registry)
+    world = WorldState(capacity=model.world.capacity, geo=model.world.geo)
+    matching_policy = make_matching_policy(model.matching)
+    dwell_policy = make_dwell_policy(model.dwell)
+    idle_policy = make_idle_policy(model.idle)
+    pricing_policy = make_pricing_policy(model.pricing)
+
+    mechanics = build_mechanics(model.mechanics, rng_registry=rng_registry)
+
+    # 3.5) Services
+    travel_time: TravelTimeService = make_travel_time(model.travel_time, mechanics=mechanics)
+
     # 4) Handlers (inject deps explicitly)
     demand = DemandHandler(world=world, mechanics=mechanics, rng=rng_registry.stream("demand"))
-    trips = TripHandler(
-        world=world,
-        matcher=assign,
-        speeds=speeds,
-        clock=clock,
-        rng=rng_registry.stream("policy"),
-        pricing=None,
-        metrics=None,
-        mechanics=mechanics,
-    )
+
     idle = IdleHandler(
-        world=world, policy=cfg.idle, demand=demand, speeds=speeds, mechanics=mechanics
+        world=world, policy=idle_policy, demand=demand, travel_time=travel_time, mechanics=mechanics
     )
 
     fleet = FleetHandler(world=world, rng=rng_registry.stream("supply"), mechanics=mechanics)
+
+    trips = TripHandler(
+        world=world,
+        matching=matching_policy,
+        travel_time=travel_time,
+        clock=clock,
+        rng=rng_registry.stream("policy"),
+        pricing=pricing_policy,
+        metrics=None,
+        mechanics=mechanics,
+    )
+
     # 5) Wiring
 
     wire(kernel, trips=trips, idle=idle, demand=demand, fleet=fleet)

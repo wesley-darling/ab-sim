@@ -5,6 +5,7 @@ from ab_sim.domain.entities.geography import Point
 from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.state import WorldState
 from ab_sim.policy.idle import IdlePolicy
+from ab_sim.services.travel_time import TravelTimeService
 from ab_sim.sim.clock import SimClock
 
 
@@ -12,17 +13,17 @@ class IdleHandler:
     def __init__(
         self,
         world: WorldState,
-        policy: IdlePolicy,
+        idle: IdlePolicy,
         demand: DemandHandler,
         mechanics: Mechanics,
         clock: SimClock,
-        speeds=None,
+        travel_time: TravelTimeService,
     ):
         self.world = world
-        self.policy = policy
+        self.idle = idle
         self.demand = demand
         self.mechanics = mechanics
-        self.speeds = speeds
+        self.travel_time = travel_time
         self.clock = clock
 
     def on_trip_completed(self, ev):

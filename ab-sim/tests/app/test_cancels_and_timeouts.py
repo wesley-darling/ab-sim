@@ -18,7 +18,7 @@ from ab_sim.app.wiring import wire
 from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.domain.state import Driver, WorldState
 from ab_sim.io.config import MechanicsConfig
-from ab_sim.policy.assign import NearestAssign
+from ab_sim.policy.matching import NearestAssign
 from ab_sim.policy.pricing import PricingPolicy
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.hooks import NoopHooks
