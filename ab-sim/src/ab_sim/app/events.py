@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from ab_sim.domain.entities.motion import Coord
+from ab_sim.domain.entities.geography import Point
 from ab_sim.sim.event import BaseEvent
 
 LegKind = Literal["pickup", "dropoff", "reposition"]
@@ -12,8 +12,8 @@ LegKind = Literal["pickup", "dropoff", "reposition"]
 @dataclass(order=True)
 class RiderRequestPlaced(BaseEvent):
     rider_id: int
-    pickup: Coord
-    dropoff: Coord
+    pickup: Point
+    dropoff: Point
     max_wait_s: float
     walk_s: float  # 0 for “already at pickup”
 
@@ -129,7 +129,7 @@ class DriverAvailable(BaseEvent):
 @dataclass(order=True)
 class DriverStartShift(BaseEvent):
     driver_id: int
-    loc: Coord
+    loc: Point
 
 
 # logging

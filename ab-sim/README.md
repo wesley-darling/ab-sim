@@ -246,13 +246,13 @@ contracts.md: “engine doesn’t call sleep(), policies don’t mutate time, mo
 What to build (work breakdown)
 A) Core engine (foundation)
 
-Event types & queue: Event{t, kind, id, payload}, priority queue, schedule(), run().
+✅ Event types & queue: Event{t, kind, id, payload}, priority queue, schedule(), run().
 
-Clock & RNG registry: named RNG streams (demand, speeds, policy).
+✅ Clock & RNG registry: named RNG streams (demand, speeds, policy).
 
-World state: typed Driver, Rider, indices (idle set, waiting set).
+✅ World state: typed Driver, Rider, indices (idle set, waiting set).
 
-FSM/transitions: driver phases (IDLE → TO_PICKUP → TO_DROPOFF → IDLE), guards, actions.
+✅ FSM/transitions: driver phases (IDLE → TO_PICKUP → TO_DROPOFF → IDLE), guards, actions.
 
 Mechanics: distance/ETA, movement math (meters/seconds).
 

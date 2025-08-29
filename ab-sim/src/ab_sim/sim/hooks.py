@@ -1,10 +1,17 @@
 # sim/hooks.py
 from typing import Protocol
+
 from ab_sim.sim.event import BaseEvent
 
 
 class KernelHooks(Protocol):
-    def run_start(self, *, until, max_events, qsize): ...
+    def run_start(
+        self,
+        *,
+        until,
+        max_events,
+        qsize,
+    ): ...
     def run_end(self, *, processed, last_t, qsize, wall_ms): ...
     def schedule(self, ev: BaseEvent, *, now, qsize): ...
     def dispatch_start(self, ev: BaseEvent, *, seq, qsize, handlers): ...

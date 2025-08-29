@@ -1,5 +1,6 @@
 # ab_sim/app/controllers/trips.py
 
+
 from ab_sim.app.events import (
     AlightingComplete,
     AlightingStarted,
@@ -18,14 +19,14 @@ from ab_sim.app.events import (
     TripCompleted,
 )
 from ab_sim.domain.entities.driver import Driver
-from ab_sim.domain.entities.motion import MoveTask
+from ab_sim.domain.entities.motion import MovePlan, MoveTask
+from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.state import TripState, WorldState
 from ab_sim.policy.assign import MatchingPolicy
 from ab_sim.policy.pricing import PricingPolicy
 from ab_sim.policy.travel_time import FixedSpeedModel
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.metrics import Metrics
-from ab_sim.sim.rng import RNGRegistry
 
 
 class TripHandler:
@@ -35,14 +36,18 @@ class TripHandler:
         matcher: MatchingPolicy,
         speeds: FixedSpeedModel,
         clock: SimClock,
-        rng: RNGRegistry,
+        rng,
         pricing: PricingPolicy,
         metrics: Metrics,
+        mechanics: Mechanics,
         max_driver_wait_s: float = 300.0,
         dwell=None,
     ):
         self.world = world
         self.speeds = speeds
+        self.mechanics = mechanics
+        self.clock = clock
+        self.rng = rng
         self.max_driver_wait_s = max_driver_wait_s
         self.dwell = dwell
         self._rider_cancel_emitted: set[int] = set()  # rider_id → cancel already emitted
@@ -65,6 +70,20 @@ class TripHandler:
     def _alighting_delay(self, rider_id, driver_id):
         return self.dwell.alighting_delay(rider_id, driver_id) if self.dwell else 0.0
 
+    #!TODO Update below
+
+    def estimate_pickup_eta(self, driver_pos, rider_pickup, now_s, dow, hour):
+        return self.mechanics.eta(driver_pos, rider_pickup, now_s, dow=dow, hour=hour)
+
+    def estimate_trip_eta(self, pickup, dropoff, now_s, dow, hour):
+        return self.mechanics.eta(pickup, dropoff, now_s, dow=dow, hour=hour)
+
+    def path_for_pricing(self, pickup, dropoff):
+        path = self.mechanics.route(pickup, dropoff)
+        return path.total_length_m, path
+
+    # ------------ causal event handlers --------------
+
     def on_rider_cancel(self, ev: RiderCancel):
         trip = self.world.trips.get(ev.rider_id)
         if not trip or trip.boarded:
@@ -81,14 +100,14 @@ class TripHandler:
         self.world.active_task.pop(key, None)
 
         # If en-route to pickup, update position to the cancel time.
-        if d.current_move and d.state == "to_pickup":
-            d.loc = d.current_move.pos(ev.t)
+        if d.motion and d.state == "to_pickup":
+            d.loc = d.pos_at(ev.t)
 
         # Invalidate any scheduled arrivals/wait timeouts for this task.
         d.task_id += 1
 
         # Free driver immediately.
-        d.current_move = None
+        d.clear_motion()
         self.world.return_idle(d)
 
         # Remove trip/rider; DemandHandler will also remove from queue if needed (idempotent).
@@ -117,12 +136,17 @@ class TripHandler:
         self.world.active_task[(d.id, d.task_id)] = trip.rider_id
 
         d.state = "to_pickup"
-        dur = self.speeds.duration_to_pickup(d, trip, ev.t)
-        d.current_move = MoveTask(start=d.loc, end=trip.origin, start_t=ev.t, end_t=ev.t + dur)
-        t_arr = d.current_move.end_t
+
+        plan = self.mechanics.move_plan(d.loc, trip.origin, ev.t, **self.clock.dow_hour_at(ev.t))
+        d.motion = plan
+
         return [
             DriverLegArrive(
-                t=t_arr, driver_id=d.id, rider_id=trip.rider_id, kind="pickup", task_id=d.task_id
+                t=plan.end_t,
+                driver_id=d.id,
+                rider_id=trip.rider_id,
+                kind="pickup",
+                task_id=d.task_id,
             ),
             PickupDeadline(
                 t=ev.t + self.world.riders.get(trip.rider_id).max_wait_s, rider_id=trip.rider_id
@@ -138,8 +162,8 @@ class TripHandler:
         out: list[object] = []
         if ev.kind == "pickup":
             trip = self.world.trips.get(ev.rider_id)
-            d.loc = d.current_move.end
-            d.current_move = None
+            d.snap_to_plan_end()
+            d.clear_motion()
             if trip is None:
                 # trip canceled while en route; driver is already idle via _cancel_trip
                 return [DriverAvailable(t=ev.t, driver_id=d.id)]
@@ -156,8 +180,8 @@ class TripHandler:
                 )
         elif ev.kind == "dropoff":
             trip = self.world.trips.get(ev.rider_id)
-            d.loc = d.current_move.end
-            d.current_move = None
+            d.snap_to_plan_end()
+            d.clear_motion()
             delay = self._alighting_delay(trip.rider_id, d.id)
             return [
                 AlightingStarted(t=ev.t, rider_id=trip.rider_id, driver_id=d.id, task_id=d.task_id),
@@ -167,8 +191,8 @@ class TripHandler:
             ]
 
         elif ev.kind == "reposition":
-            d.loc = d.current_move.end
-            d.current_move = None
+            d.snap_to_plan_end()
+            d.clear_motion()
             self.world.return_idle(d)
         return out
 
@@ -201,7 +225,7 @@ class TripHandler:
         d = self.world.drivers.get(ev.driver_id)
         # Invalidate in-flight arrivals/waits
         d.task_id += 1
-        d.current_move = None
+        d.clear_motion()
         self.world.return_idle(d)
 
         out = [DriverAvailable(t=ev.t, driver_id=d.id)]
@@ -233,17 +257,25 @@ class TripHandler:
             return []
         trip.boarded = True
         now = ev.t
-        dur = self.speeds.duration_to_dropoff(d, trip, now)
+
         d.state = "to_dropoff"
-        d.current_move = MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=now + dur)
+        if self.mechanics is not None:
+            plan = self.mechanics.move_plan(d.loc, trip.dest, now, **self.clock.dow_hour_at(now))
+            d.motion = plan
+            t_arr = plan.end_t
+        else:
+            dur = self.speeds.duration_to_dropoff(d, trip, now)
+            d.motion = MovePlan(
+                tasks=[MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=now + dur)],
+                total_length_m=((trip.dest.x - d.loc.x) ** 2 + (trip.dest.y - d.loc.y) ** 2) ** 0.5,
+                start_t=now,
+                end_t=now + dur,
+            )
+            t_arr = now + dur
         return [
             TripBoarded(t=now, rider_id=trip.rider_id, driver_id=d.id),
             DriverLegArrive(
-                t=now + dur,
-                driver_id=d.id,
-                rider_id=trip.rider_id,
-                kind="dropoff",
-                task_id=d.task_id,
+                t=t_arr, driver_id=d.id, rider_id=trip.rider_id, kind="dropoff", task_id=d.task_id
             ),
         ]
 
@@ -251,13 +283,16 @@ class TripHandler:
     def _board_and_depart(self, now: float, trip: TripState, d: Driver):
         trip.boarded = True
         # schedule dropoff leg
-        dur = self.speeds.duration_to_dropoff(d, trip, now)
+
         d.state = "to_dropoff"
-        d.current_move = MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=now + dur)
+
+        plan = self.mechanics.move_plan(d.loc, trip.dest, now, **self.clock.dow_hour_at(now))
+        d.motion = plan
+
         return [
             TripBoarded(t=now, rider_id=trip.rider_id, driver_id=d.id),
             DriverLegArrive(
-                t=d.current_move.end_t,
+                t=plan.end_t,
                 driver_id=d.id,
                 rider_id=trip.rider_id,
                 kind="dropoff",

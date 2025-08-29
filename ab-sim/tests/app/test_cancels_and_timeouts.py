@@ -13,8 +13,11 @@ from ab_sim.app.events import (
     RiderCancel,
     RiderRequestPlaced,
 )
+from ab_sim.app.protocols import Point
 from ab_sim.app.wiring import wire
+from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.domain.state import Driver, WorldState
+from ab_sim.io.config import MechanicsConfig
 from ab_sim.policy.assign import NearestAssign
 from ab_sim.policy.pricing import PricingPolicy
 from ab_sim.sim.clock import SimClock
@@ -75,26 +78,42 @@ class ZeroDwell:
 def build_app(*, add_driver=True, pickup_s=10.0, dropoff_s=20.0, max_driver_wait_s=3.0, dwell=None):
     world = WorldState()
     if add_driver:
-        world.add_driver(Driver(id=1, loc=(0.0, 0.0)))
+        world.add_driver(Driver(id=1, loc=Point(0.0, 0.0)))
 
     speeds = FixedSpeedModel(pickup_s=pickup_s, dropoff_s=dropoff_s)
     dwell = dwell if dwell is not None else ZeroDwell()
     speeds = FixedSpeedModel(pickup_s=pickup_s, dropoff_s=dropoff_s)
-    dwell = ZeroDwell()
+    mech_cfg = MechanicsConfig(
+        mode="idealized",
+        metric="euclidean",
+        speed_kind="constant",
+        base_mps=max(pickup_s, dropoff_s),
+    )
+    rng_registry = RNGRegistry(master_seed=0, scenario="tests", worker=0)
+    mechanics = build_mechanics(mech_cfg, rng_registry=rng_registry)
+    clock = SimClock.utc_epoch(2025, 1, 1, 0, 0, 0)
     trips = TripHandler(
         world=world,
         speeds=speeds,
+        mechanics=mechanics,
         max_driver_wait_s=max_driver_wait_s,
         dwell=dwell,
         matcher=NearestAssign(world),
-        clock=SimClock([2025, 1, 1, 0, 0, 0]),
-        rng=RNGRegistry(master_seed=0),
+        clock=clock,
+        rng=rng_registry,
         pricing=PricingPolicy(0),
         metrics=Metrics("test"),
     )
-    demand = DemandHandler(world=world)
-    idle = IdleHandler(world=world, policy=IdlePolicy(dwell_s=0.0), demand=demand, speeds=speeds)
-    fleet = FleetHandler(world)
+    demand = DemandHandler(world=world, rng=rng_registry, mechanics=mechanics)
+    idle = IdleHandler(
+        world=world,
+        policy=IdlePolicy(dwell_s=0.0),
+        demand=demand,
+        speeds=speeds,
+        mechanics=mechanics,
+        clock=clock,
+    )
+    fleet = FleetHandler(world=world, rng=rng_registry, mechanics=mechanics)
 
     hooks = Trace()
     k = Kernel(hooks=hooks)

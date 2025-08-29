@@ -13,9 +13,20 @@ from ab_sim.domain.state import Rider, TripState, WorldState
 
 
 class DemandHandler:
-    def __init__(self, world: WorldState):
+    def __init__(self, world: WorldState, rng, mechanics):
         self.world = world
+        self.rng = rng
+        self.mechanics = mechanics
         self.queue = deque()  # rider_ids in FIFO (replace with spatial/priority later)
+
+    #! TODO replace with actual sampler
+    def sample_request(self, now_s, dow, hour):
+        o = self.mechanics.space.sample_origin(self.rng)
+        d = self.mechanics.space.sample_destination(self.rng)
+        o_snap, walk_seg = self.mechanics.space.snap(o, kind="rider")
+        d_snap, _ = self.mechanics.space.snap(d, kind="rider")
+        # return an object your event uses; include walk_seg if you log walk-to-pickup
+        return o_snap, d_snap, walk_seg
 
     def on_rider_request(self, ev: RiderRequestPlaced):
         r = Rider(ev.rider_id, ev.pickup, ev.dropoff, ev.max_wait_s, ev.walk_s)

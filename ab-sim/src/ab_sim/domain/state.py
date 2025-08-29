@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 
 from ab_sim.domain.entities.driver import Driver
-from ab_sim.domain.entities.motion import Coord
+from ab_sim.domain.entities.geography import Point
 from ab_sim.domain.entities.rider import Rider
 
 
@@ -10,8 +10,8 @@ from ab_sim.domain.entities.rider import Rider
 class TripState:
     rider_id: int
     driver_id: int
-    origin: Coord
-    dest: Coord
+    origin: Point
+    dest: Point
     driver_at_pickup_t: float | None = None
     rider_at_pickup_t: float | None = None
     boarding_started_t: float | None = None
@@ -46,7 +46,7 @@ class WorldState:
 
     def return_idle(self, d: Driver) -> None:
         d.state = "idle"
-        d.current_move = None
+        d.clear_motion()
         self.idle_driver_ids.add(d.id)
 
 

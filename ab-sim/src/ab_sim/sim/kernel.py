@@ -37,7 +37,13 @@ class Kernel:
         while self._q and (until is None or self._q[0][0] <= until):
             t, _, ev = heapq.heappop(self._q)
             if t < self._t - 1e-9:
-                self._hooks.error(ev, reason="time_backwards", prev_t=self._t, t=t)
+                self._hooks.error(
+                    ev,
+                    exc=RuntimeError(f"time went backwards: {t} < {self._t}"),
+                    reason="time_backwards",
+                    prev_t=self._t,
+                    t=t,
+                )
                 raise RuntimeError(f"time went backwards: {t} < {self._t}")
             self._t = t
             handlers = self._subs.get(type(ev), ())
@@ -52,6 +58,9 @@ class Kernel:
                     if nxt.t + 1e-12 < self._t:
                         self._hooks.error(
                             ev,
+                            exc=RuntimeError(
+                                f"handler scheduled past event at {nxt.t} < now {self._t}"
+                            ),
                             reason="scheduled_past",
                             scheduled_t=nxt.t,
                             nxt_type=type(nxt).__name__,
@@ -61,7 +70,7 @@ class Kernel:
                         )
                     self.schedule(nxt)
             ms = (time.perf_counter() - t1) * 1000
-            self._hooks.dispatch_end(ev, out_events=total_out, ms=ms)
+            self._hooks.dispatch_end(ev, produced=total_out, qsize=len(self._q), ms=ms)
             processed += 1
             if max_events and processed >= max_events:
                 break

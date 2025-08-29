@@ -1,5 +1,6 @@
 # ab_sim/app/wiring.py
 from ab_sim.app.controllers.demand import DemandHandler
+from ab_sim.app.controllers.fleet import FleetHandler
 from ab_sim.app.controllers.idle import IdleHandler
 from ab_sim.app.controllers.trips import TripHandler
 from ab_sim.app.events import (
@@ -33,7 +34,7 @@ def wire(
     demand: DemandHandler,
     idle: IdleHandler,
     housekeeping=None,
-    fleet=None,
+    fleet: FleetHandler,
 ) -> None:
     k = kernel
 

@@ -1,0 +1,20 @@
+mechanics:
+  mode: network           # idealized | empirical | network
+  seed: 42
+  # idealized only:
+  metric: manhattan
+  zones:
+    - [0, 0, 16000, 12000]
+  zone_weights: [1.0]
+  # empirical only:
+  shapefile_path: data/west_sactracts.shp
+  # network only:
+  graph_pickle_path: data/west_sac_graph.pkl
+  # speeds:
+  speed_kind: dow_hour    # constant | distribution | dow_hour
+  base_mps: 9.5
+  dow_hour_multiplier:
+    "1:8": 0.85     # Mon 8am
+    "1:17": 0.70    # Mon 5pm
+    "6:14": 1.20    # Sat 2pm
+  edge_factor: {}        # edge_id -> factor
