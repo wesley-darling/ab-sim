@@ -23,6 +23,8 @@ class IdealizedODSampler(OriginDestinationSampler):
         if weights is None:
             return None  # uniform in Generator.choice
         w = np.asarray(weights, dtype=float)
+        if w.size == 0:
+            return None
         if w.shape != (n,):
             raise ValueError(f"zone weights must have length {n}, got {w.shape[0]}")
         if not np.isfinite(w).all():
