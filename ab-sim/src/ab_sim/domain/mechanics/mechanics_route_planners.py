@@ -5,22 +5,22 @@ from ab_sim.domain.entities.geography import NetworkGraph, Path, Point, Segment
 
 
 class EuclidRoutePlanner(RoutePlanner):
-    def route(self, a, b):
+    def route(self, a: Point, b: Point) -> Path:
         L = math.hypot(b.x - a.x, b.y - a.y)
         return Path([Segment(a, b, L)], L)
 
-    def distance_m(self, a, b):
+    def distance_m(self, a: Point, b: Point) -> float:
         return math.hypot(b.x - a.x, b.y - a.y)
 
 
 class ManhattanRoutePlanner(RoutePlanner):
-    def route(self, a, b):
+    def route(self, a: Point, b: Point) -> Path:
         dx, dy = b.x - a.x, b.y - a.y
         p1 = Point(b.x, a.y)
         segs = [Segment(a, p1, abs(dx)), Segment(p1, b, abs(dy))]
         return Path(segs, abs(dx) + abs(dy))
 
-    def distance_m(self, a, b):
+    def distance_m(self, a: Point, b: Point) -> float:
         return abs(b.x - a.x) + abs(b.y - a.y)
 
 
@@ -28,7 +28,7 @@ class NetworkRoutePlanner(RoutePlanner):
     def __init__(self, graph: NetworkGraph, vmax_mps: float = 16.7):
         self.G, self.vmax = graph, vmax_mps
 
-    def route(self, a, b):
+    def route(self, a: Point, b: Point) -> Path:
         na, nb = self.G.nearest_node(a), self.G.nearest_node(b)
         nodes = self.G.astar(na, nb, self._h)
         segs, L = [], 0.0
@@ -44,7 +44,7 @@ class NetworkRoutePlanner(RoutePlanner):
             )
         return Path(segs, L)
 
-    def distance_m(self, a, b):
+    def distance_m(self, a: Point, b: Point) -> float:
         return self.route(a, b).total_length_m
 
     def _h(self, u, goal):

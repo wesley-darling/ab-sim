@@ -27,7 +27,7 @@ def build_mechanics(cfg: MechanicsModel, rng_registry: RNGRegistry, *, graphs=No
     speed_sampler = make_speed(cfg.speed_sampler, deps={"rng": rng_speed_sampler})
     od_sampler = make_od(cfg.od_sampler, deps={"rng": rng_od})
     route_planner = make_route_planner(cfg.route_planner)
-    path_traverser = make_path_traverser(cfg.path_traverse)
+    path_traverser = make_path_traverser(cfg.path_traverser)
 
     return Mechanics(
         od_sampler=od_sampler,

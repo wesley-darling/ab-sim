@@ -18,5 +18,6 @@ def test_weekday_and_hour_at_utc():
 
 def test_dow_hour_pair():
     clock = SimClock.utc_epoch(2025, 1, 3, 23, 0, 0)  # Friday 23:00
-    dow, hour = clock.dow_hour_at(hours(2.0))  # +2h => Saturday 01:00
-    assert (dow, hour) == (5, 1)  # Sat=5 when Mon=0
+
+    dowhour_dict = clock.dow_hour_at(hours(2.0))  # +2h => Saturday 01:00
+    assert (dowhour_dict["dow"], dowhour_dict["hour"]) == (5, 1)  # Sat=5 when Mon=0

@@ -1,9 +1,9 @@
 from ab_sim.app.controllers.demand import DemandHandler
 from ab_sim.app.controllers.fleet import FleetHandler
-from ab_sim.app.controllers.idle import IdleHandler, IdlePolicy
+from ab_sim.app.controllers.idle import IdleHandler
 
 # Controllers
-from ab_sim.app.controllers.trips import FixedSpeedModel, TripHandler
+from ab_sim.app.controllers.trips import TripHandler
 
 # Events
 from ab_sim.app.events import (
@@ -15,11 +15,13 @@ from ab_sim.app.events import (
 )
 from ab_sim.app.protocols import Point
 from ab_sim.app.wiring import wire
+from ab_sim.config.models import MechanicsModel
 from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.domain.state import Driver, WorldState
-from ab_sim.io.config import MechanicsConfig
-from ab_sim.policy.matching import NearestAssign
-from ab_sim.policy.pricing import PricingPolicy
+from ab_sim.policy.idle import CirculatingIdlePolicy
+from ab_sim.policy.matching import NearestAssignMatchingPolicy
+from ab_sim.policy.pricing import ConstantPricingPolicy
+from ab_sim.services.travel_time import FixedDurationTravelTime
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.hooks import NoopHooks
 from ab_sim.sim.kernel import Kernel
@@ -80,36 +82,43 @@ def build_app(*, add_driver=True, pickup_s=10.0, dropoff_s=20.0, max_driver_wait
     if add_driver:
         world.add_driver(Driver(id=1, loc=Point(0.0, 0.0)))
 
-    speeds = FixedSpeedModel(pickup_s=pickup_s, dropoff_s=dropoff_s)
+    travel_time = FixedDurationTravelTime(
+        pickup_s=pickup_s, dropoff_s=dropoff_s, reposition_s=max(pickup_s, dropoff_s)
+    )
     dwell = dwell if dwell is not None else ZeroDwell()
-    speeds = FixedSpeedModel(pickup_s=pickup_s, dropoff_s=dropoff_s)
-    mech_cfg = MechanicsConfig(
-        mode="idealized",
-        metric="euclidean",
-        speed_kind="constant",
-        base_mps=max(pickup_s, dropoff_s),
+
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 0,
+            "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+            "route_planner": {"kind": "euclidean"},
+            # mechanics speeds don't affect these tests because we use FixedDurationTravelTime,
+            # but set a sensible default anyway:
+            "speed_sampler": {"kind": "global", "v_mps": max(pickup_s, dropoff_s)},
+            "path_traverser": {"kind": "piecewise_const"},
+        }
     )
     rng_registry = RNGRegistry(master_seed=0, scenario="tests", worker=0)
     mechanics = build_mechanics(mech_cfg, rng_registry=rng_registry)
     clock = SimClock.utc_epoch(2025, 1, 1, 0, 0, 0)
     trips = TripHandler(
         world=world,
-        speeds=speeds,
+        travel_time=travel_time,
         mechanics=mechanics,
         max_driver_wait_s=max_driver_wait_s,
         dwell=dwell,
-        matcher=NearestAssign(world),
+        matching=NearestAssignMatchingPolicy(world),
         clock=clock,
         rng=rng_registry,
-        pricing=PricingPolicy(0),
+        pricing=ConstantPricingPolicy,
         metrics=Metrics("test"),
     )
     demand = DemandHandler(world=world, rng=rng_registry, mechanics=mechanics)
     idle = IdleHandler(
         world=world,
-        policy=IdlePolicy(dwell_s=0.0),
+        idle=CirculatingIdlePolicy(dwell_s=0.0),
         demand=demand,
-        speeds=speeds,
+        travel_time=travel_time,
         mechanics=mechanics,
         clock=clock,
     )
@@ -138,13 +147,13 @@ def test_user_cancel_while_en_route_frees_driver_immediately_and_rematches():
     # r1 request → immediate assign; pickup arrival would be at t=10
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=1, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0
+            t=0.0, rider_id=1, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0
         )
     )
     # r2 request queued at t=1
     k.schedule(
         RiderRequestPlaced(
-            t=1.0, rider_id=2, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=1.0, rider_id=2, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     # user cancels r1 at t=3
@@ -171,12 +180,12 @@ def test_pickup_deadline_translates_to_rider_cancel_and_immediate_rematch():
 
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=10, pickup=(0, 0), dropoff=(1, 1), max_wait_s=8, walk_s=999
+            t=0.0, rider_id=10, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=8, walk_s=999
         )
     )
     k.schedule(
         RiderRequestPlaced(
-            t=5.0, rider_id=20, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=5.0, rider_id=20, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     # Explicitly schedule the deadline (if your Demand/Trip code didn't already)
@@ -202,13 +211,13 @@ def test_driver_wait_timeout_translates_to_driver_cancel_and_requeue_rider():
 
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=100, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=999
+            t=0.0, rider_id=100, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=999
         )
     )
     # Another rider shows up while driver is waiting
     k.schedule(
         RiderRequestPlaced(
-            t=11.0, rider_id=200, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=11.0, rider_id=200, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     # The wait timeout should be scheduled internally at pickup-arrival + 3 = 13,
@@ -241,16 +250,16 @@ def test_rider_cancel_before_assignment_removes_from_queue_no_assignment_occurs(
 
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=501, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0
+            t=0.0, rider_id=501, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0
         )
     )
     k.schedule(RiderCancel(t=2.0, rider_id=501, reason="user"))
 
     # Add a driver later and a new rider
-    k.schedule(DriverStartShift(t=5.0, driver_id=1, loc=(0.0, 0.0)))
+    k.schedule(DriverStartShift(t=5.0, driver_id=1, loc=Point(0.0, 0.0)))
     k.schedule(
         RiderRequestPlaced(
-            t=5.0, rider_id=502, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=5.0, rider_id=502, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     k.run(until=100.0)
@@ -270,12 +279,12 @@ def test_completion_without_dwell_assigns_next_rider_at_completion_time():
 
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=601, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0
+            t=0.0, rider_id=601, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0
         )
     )
     k.schedule(
         RiderRequestPlaced(
-            t=5.0, rider_id=602, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=5.0, rider_id=602, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     k.run(until=200.0)

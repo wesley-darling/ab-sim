@@ -1,6 +1,8 @@
 # ab_sim/app/controllers/trips.py
 
 
+from contextlib import suppress
+
 from ab_sim.app.events import (
     AlightingComplete,
     AlightingStarted,
@@ -45,6 +47,7 @@ class TripHandler:
     ):
         self.world = world
         self.travel_time = travel_time
+        self.matching = matching
         self.mechanics = mechanics
         self.clock = clock
         self.rng = rng
@@ -72,11 +75,11 @@ class TripHandler:
 
     #!TODO Update below
 
-    def estimate_pickup_eta(self, driver_pos, rider_pickup, now_s, dow, hour):
-        return self.mechanics.eta(driver_pos, rider_pickup, now_s, dow=dow, hour=hour)
+    def estimate_pickup_eta(self, driver: Driver, trip: TripState, now_s: float, *_):
+        return self.travel_time.duration_to_pickup(driver, trip, now_s)
 
-    def estimate_trip_eta(self, pickup, dropoff, now_s, dow, hour):
-        return self.mechanics.eta(pickup, dropoff, now_s, dow=dow, hour=hour)
+    def estimate_trip_eta(self, driver: Driver, trip: TripState, now_s: float, *_):
+        return self.travel_time.duration_to_dropoff(driver, trip, now_s)
 
     def path_for_pricing(self, pickup, dropoff):
         path = self.mechanics.route(pickup, dropoff)
@@ -135,21 +138,32 @@ class TripHandler:
 
         self.world.active_task[(d.id, d.task_id)] = trip.rider_id
 
+        with suppress(Exception):
+            self.world.idle.discard(d.id)
+
         d.state = "to_pickup"
 
-        plan = self.mechanics.move_plan(d.loc, trip.origin, ev.t, **self.clock.dow_hour_at(ev.t))
-        d.motion = plan
+        dt = float(self.travel_time.duration_to_pickup(d, trip, ev.t))
+        t_arr = ev.t + max(0.0, dt)
+
+        d.motion = MovePlan(
+            tasks=[MoveTask(start=d.loc, end=trip.origin, start_t=ev.t, end_t=t_arr)],
+            total_length_m=((trip.origin.x - d.loc.x) ** 2 + (trip.origin.y - d.loc.y) ** 2) ** 0.5,
+            start_t=ev.t,
+            end_t=t_arr,
+        )
 
         return [
             DriverLegArrive(
-                t=plan.end_t,
+                t=t_arr,
                 driver_id=d.id,
                 rider_id=trip.rider_id,
                 kind="pickup",
                 task_id=d.task_id,
             ),
             PickupDeadline(
-                t=ev.t + self.world.riders.get(trip.rider_id).max_wait_s, rider_id=trip.rider_id
+                t=ev.t + self.world.riders.get(trip.rider_id).max_wait_s,
+                rider_id=trip.rider_id,
             ),
         ]
 
@@ -259,19 +273,17 @@ class TripHandler:
         now = ev.t
 
         d.state = "to_dropoff"
-        if self.mechanics is not None:
-            plan = self.mechanics.move_plan(d.loc, trip.dest, now, **self.clock.dow_hour_at(now))
-            d.motion = plan
-            t_arr = plan.end_t
-        else:
-            dur = self.travel_time.duration_to_dropoff(d, trip, now)
-            d.motion = MovePlan(
-                tasks=[MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=now + dur)],
-                total_length_m=((trip.dest.x - d.loc.x) ** 2 + (trip.dest.y - d.loc.y) ** 2) ** 0.5,
-                start_t=now,
-                end_t=now + dur,
-            )
-            t_arr = now + dur
+
+        dur = float(self.travel_time.duration_to_dropoff(d, trip, now))
+        t_arr = now + max(0.0, dur)
+
+        d.motion = MovePlan(
+            tasks=[MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=t_arr)],
+            total_length_m=((trip.dest.x - d.loc.x) ** 2 + (trip.dest.y - d.loc.y) ** 2) ** 0.5,
+            start_t=now,
+            end_t=t_arr,
+        )
+
         return [
             TripBoarded(t=now, rider_id=trip.rider_id, driver_id=d.id),
             DriverLegArrive(
@@ -286,17 +298,20 @@ class TripHandler:
 
         d.state = "to_dropoff"
 
-        plan = self.mechanics.move_plan(d.loc, trip.dest, now, **self.clock.dow_hour_at(now))
-        d.motion = plan
+        dur = float(self.travel_time.duration_to_dropoff(d, trip, now))
+        t_arr = now + max(0.0, dur)
+
+        d.motion = MovePlan(
+            tasks=[MoveTask(start=d.loc, end=trip.dest, start_t=now, end_t=t_arr)],
+            total_length_m=((trip.dest.x - d.loc.x) ** 2 + (trip.dest.y - d.loc.y) ** 2) ** 0.5,
+            start_t=now,
+            end_t=t_arr,
+        )
 
         return [
             TripBoarded(t=now, rider_id=trip.rider_id, driver_id=d.id),
             DriverLegArrive(
-                t=plan.end_t,
-                driver_id=d.id,
-                rider_id=trip.rider_id,
-                kind="dropoff",
-                task_id=d.task_id,
+                t=t_arr, driver_id=d.id, rider_id=trip.rider_id, kind="dropoff", task_id=d.task_id
             ),
         ]
 

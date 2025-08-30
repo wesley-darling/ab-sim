@@ -1,15 +1,17 @@
 # tests/app/test_pickup_and_rendezvous.py
 from ab_sim.app.controllers.demand import DemandHandler
 from ab_sim.app.controllers.fleet import FleetHandler
-from ab_sim.app.controllers.idle import IdleHandler, IdlePolicy
+from ab_sim.app.controllers.idle import IdleHandler
 from ab_sim.app.controllers.trips import TripHandler
 from ab_sim.app.events import RiderCancel, RiderRequestPlaced
 from ab_sim.app.wiring import wire
-from ab_sim.config.mechanics import MechanicsModel
+from ab_sim.config.models import MechanicsModel
+from ab_sim.domain.entities.geography import Point
 from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.domain.state import Driver, WorldState
-from ab_sim.policy.matching import NearestAssign
-from ab_sim.policy.pricing import PricingPolicy
+from ab_sim.policy.idle import CirculatingIdlePolicy
+from ab_sim.policy.matching import NearestAssignMatchingPolicy
+from ab_sim.policy.pricing import ConstantPricingPolicy
 from ab_sim.services.travel_time import FixedDurationTravelTime
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.hooks import NoopHooks
@@ -43,14 +45,14 @@ class FixedDwell:
 def build_app(pickup_s=10.0, dropoff_s=20.0, board_s=5.0, alight_s=3.0):
     world = WorldState()
     # one idle driver at (0,0)
-    world.add_driver(Driver(id=1, loc=(0.0, 0.0)))
+    world.add_driver(Driver(id=1, loc=Point(0.0, 0.0)))
     mech_cfg = MechanicsModel.model_validate(
         {
             "seed": 0,
             "od_sampler": {"kind": "idealized", "zones": [(0, 0, 10_000, 10_000)]},
             "route_planner": {"kind": "euclidean"},
-            "speed_sampler": {"kind": "constant", "v_mps": max(pickup_s, dropoff_s)},
-            "path_traverser": {"kind": "piecewise_const", "step_m": 50.0},
+            "speed_sampler": {"kind": "global", "v_mps": max(pickup_s, dropoff_s)},
+            "path_traverser": {"kind": "piecewise_const"},
         }
     )
     mechanics = build_mechanics(
@@ -68,16 +70,16 @@ def build_app(pickup_s=10.0, dropoff_s=20.0, board_s=5.0, alight_s=3.0):
         mechanics=mechanics,
         max_driver_wait_s=300.0,
         dwell=dwell,
-        matching=NearestAssign(world),
+        matching=NearestAssignMatchingPolicy(world),
         clock=clock,
         rng=rng_registry,
-        pricing=PricingPolicy(0),
+        pricing=ConstantPricingPolicy(0),
         metrics=Metrics("test"),
     )
     demand = DemandHandler(world=world, rng=rng_registry, mechanics=mechanics)
     idle = IdleHandler(
         world=world,
-        idle_policy=IdlePolicy(dwell_s=0.0),
+        idle=CirculatingIdlePolicy(dwell_s=0.0),
         demand=demand,
         travel_time=travel_time,
         mechanics=mechanics,
@@ -107,12 +109,12 @@ def test_queued_rider_served_after_trip_completion():
 
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=201, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0.0
+            t=0.0, rider_id=201, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0.0
         )
     )
     k.schedule(
         RiderRequestPlaced(
-            t=5.0, rider_id=202, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0.0
+            t=5.0, rider_id=202, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0.0
         )
     )
     k.run(until=200.0)
@@ -138,7 +140,12 @@ def test_idle_driver_matches_new_request_immediately():
     # keep driver idle until request arrives
     k.schedule(
         RiderRequestPlaced(
-            t=100.0, rider_id=301, pickup=(0, 0), dropoff=(3, 3), max_wait_s=999, walk_s=0.0
+            t=100.0,
+            rider_id=301,
+            pickup=Point(0, 0),
+            dropoff=Point(3, 3),
+            max_wait_s=999,
+            walk_s=0.0,
         )
     )
     k.run(until=200.0)
@@ -157,7 +164,12 @@ def test_driver_arrives_first_then_rider_boards():
     # Rider will walk 15s → driver (10s) arrives first, waits 5s, then depart at t=15, dropoff at 35
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=101, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=15.0
+            t=0.0,
+            rider_id=101,
+            pickup=Point(0, 0),
+            dropoff=Point(1, 1),
+            max_wait_s=999,
+            walk_s=15.0,
         )
     )
     k.run(until=100.0)
@@ -180,7 +192,7 @@ def test_rider_arrives_first_then_instant_board_on_driver_arrival():
     # Rider walks 5s → rider arrives at 5, driver arrives at 10 → board at 10, drop at 30
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=102, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=5.0
+            t=0.0, rider_id=102, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=5.0
         )
     )
     k.run(until=100.0)
@@ -199,7 +211,12 @@ def test_pickup_deadline_cancels_if_rider_not_boarded():
     # Rider walks 30s but max_wait is 8 → deadline at t=8 cancels; no boarding, no dropoff
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=103, pickup=(0, 0), dropoff=(1, 1), max_wait_s=8.0, walk_s=30.0
+            t=0.0,
+            rider_id=103,
+            pickup=Point(0, 0),
+            dropoff=Point(1, 1),
+            max_wait_s=8.0,
+            walk_s=30.0,
         )
     )
     k.run(until=100.0)
@@ -229,7 +246,7 @@ def test_dwell_when_rider_already_at_pickup():
     k, h, world = build_app(board_s=5.0, alight_s=3.0)
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=401, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0.0
+            t=0.0, rider_id=401, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0.0
         )
     )
     k.run(until=100.0)
@@ -265,7 +282,12 @@ def test_dwell_when_driver_arrives_first_then_rider():
     k, h, world = build_app(board_s=5.0, alight_s=3.0)
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=402, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=12.0
+            t=0.0,
+            rider_id=402,
+            pickup=Point(0, 0),
+            dropoff=Point(2, 2),
+            max_wait_s=999,
+            walk_s=12.0,
         )
     )
     k.run(until=100.0)
@@ -294,12 +316,12 @@ def test_rider_cancel_frees_driver_and_matches_next():
     # two riders; r1 cancels at t=3 while driver en-route (pickup would be at t=10)
     k.schedule(
         RiderRequestPlaced(
-            t=0.0, rider_id=1, pickup=(0, 0), dropoff=(1, 1), max_wait_s=999, walk_s=0
+            t=0.0, rider_id=1, pickup=Point(0, 0), dropoff=Point(1, 1), max_wait_s=999, walk_s=0
         )
     )
     k.schedule(
         RiderRequestPlaced(
-            t=1.0, rider_id=2, pickup=(0, 0), dropoff=(2, 2), max_wait_s=999, walk_s=0
+            t=1.0, rider_id=2, pickup=Point(0, 0), dropoff=Point(2, 2), max_wait_s=999, walk_s=0
         )
     )
     k.schedule(RiderCancel(t=3.0, rider_id=1))

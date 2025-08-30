@@ -4,8 +4,9 @@ import pytest
 from ab_sim.app.controllers.idle import IdleHandler
 from ab_sim.app.events import DriverLegArrive
 from ab_sim.app.protocols import Point
+from ab_sim.config.models import MechanicsModel
 from ab_sim.domain.entities.driver import Driver
-from ab_sim.domain.mechanics.mechanics_factory import MechanicsConfig, build_mechanics
+from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 from ab_sim.sim.clock import SimClock
 from ab_sim.sim.rng import RNGRegistry
 
@@ -28,16 +29,17 @@ class _WorldStub:
 
 @pytest.fixture
 def mechanics_const10():
-    cfg = MechanicsConfig(
-        mode="idealized",
-        metric="euclidean",
-        zones=[(0.0, 0.0, 10_000.0, 10_000.0)],
-        speed_kind="constant",
-        base_mps=10.0,
-        seed=1,
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 1,
+            "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+            "route_planner": {"kind": "euclidean"},
+            "speed_sampler": {"kind": "global", "v_mps": 10.0},
+            "path_traverser": {"kind": "piecewise_const"},
+        }
     )
     reg = RNGRegistry(master_seed=777, scenario="idle", worker=0)
-    return build_mechanics(cfg, rng_registry=reg)
+    return build_mechanics(mech_cfg, rng_registry=reg)
 
 
 def test_reposition_starts_plan_and_schedules_arrival(mechanics_const10):
@@ -45,7 +47,7 @@ def test_reposition_starts_plan_and_schedules_arrival(mechanics_const10):
     clock = SimClock.utc_epoch(2025, 1, 1, 0, 0, 0)
     idle = IdleHandler(
         world=world,
-        policy=_FakePolicy(),
+        idle=_FakePolicy(),
         demand=_FakeDemand(),
         mechanics=mechanics_const10,
         clock=clock,
@@ -68,7 +70,7 @@ def test_reposition_preemption_bumps_task_id(mechanics_const10):
     clock = SimClock.utc_epoch(2025, 1, 1, 0, 0, 0)
     idle = IdleHandler(
         world=world,
-        policy=_FakePolicy(),
+        idle=_FakePolicy(),
         demand=_FakeDemand(),
         mechanics=mechanics_const10,
         clock=clock,

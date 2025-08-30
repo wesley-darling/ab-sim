@@ -1,7 +1,8 @@
 import os
+from math import isfinite
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FieldValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
 class SimModel(BaseModel):
@@ -73,7 +74,32 @@ class ODSamplerIdealizedModel(BaseModel):
     zones: list[tuple[float, float, float, float]] = Field(
         default_factory=lambda: [(0, 0, 10_000, 10_000)]
     )
-    weights: list[float] | None = (None,)
+    weights: list[float] | None = None
+
+    @field_validator("weights", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        # YAML [] or "" should mean "uniform"
+        if v is None:
+            return None
+        if isinstance(v | (list, tuple)) and len(v) == 0:
+            return None
+        return v
+
+    @model_validator(mode="after")
+    def _check_weights(self):
+        if self.weights is None:
+            return self
+        n = len(self.zones)
+        w = self.weights
+        if len(w) != n:
+            raise ValueError(f"zone_weights must have length {n}, got {len(w)}")
+        # reject NaN/Inf and non-positive sums early (friendlier than numpy error)
+        if any((not isinstance(x | (int, float))) or (not isfinite(float(x))) for x in w):
+            raise ValueError("zone_weights must be finite")
+        if sum(float(x) for x in w) <= 0:
+            raise ValueError("zone_weights must sum to a positive value")
+        return self
 
 
 class ODSamplerEmpiricalModel(BaseModel):
@@ -171,7 +197,7 @@ class TravelTimeServiceFixedModel(BaseModel):
     reposition_s: float = 30.0
 
     @field_validator("pickup_s", "dropoff_s", "reposition_s")
-    def _nonneg(cls, v: float, info: FieldValidationInfo) -> float:
+    def _nonneg(cls, v: float, info: ValidationInfo) -> float:
         if v < 0:
             raise ValueError(f"{info.field_name} must be >= 0")
         return v
@@ -199,7 +225,7 @@ class IdlePolicyCirculatingModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["circulating"] = "circulating"  # examples
     dwell_s: float = 0.0
-    continual_reposition: bool
+    continual_reposition: bool = False
 
 
 IdlePolicyUnion = Annotated[IdlePolicyCirculatingModel, Field(discriminator="kind")]

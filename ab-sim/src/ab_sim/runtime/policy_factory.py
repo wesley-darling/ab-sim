@@ -9,6 +9,7 @@ from ab_sim.config.models import (
     PricingPolicyConstantModel,
     PricingPolicyUnion,
 )
+from ab_sim.domain.state import WorldState
 from ab_sim.policy.dwell import ExpBoardingAlightingPolicy
 from ab_sim.policy.idle import CirculatingIdlePolicy
 from ab_sim.policy.matching import NearestAssignMatchingPolicy
@@ -38,9 +39,9 @@ def make_idle_policy(cfg: IdlePolicyUnion) -> IdlePolicy:
         raise TypeError(cfg)
 
 
-def make_matching_policy(cfg: MatchingPolicyUnion) -> MatchingPolicy:
+def make_matching_policy(cfg: MatchingPolicyUnion, world: WorldState) -> MatchingPolicy:
     if isinstance(cfg, MatchingPolicyNearestAssignModel):
-        mp = NearestAssignMatchingPolicy()
+        mp = NearestAssignMatchingPolicy(world=world)
         return mp
     else:
         raise TypeError(cfg)

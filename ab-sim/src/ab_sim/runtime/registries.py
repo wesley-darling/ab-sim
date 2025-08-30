@@ -71,9 +71,9 @@ def register_speed(kind: str):
     return deco
 
 
-def make_speed(cfg: SpeedSamplerUnion, *, rng) -> SpeedSampler:
+def make_speed(cfg: SpeedSamplerUnion, *, deps: dict = {}) -> SpeedSampler:
     try:
-        return _speed_registry[cfg.kind](cfg, {"rng": rng})
+        return _speed_registry[cfg.kind](cfg, deps)
     except KeyError:
         raise ValueError(f"Unknown speed kind {cfg.kind!r}")
 
@@ -137,14 +137,14 @@ def resolve_graph(ref: GraphRef | None, *, deps: dict):
     raise TypeError(ref)
 
 
-def make_od(cfg: ODUnion, *, deps: dict) -> OriginDestinationSampler:
+def make_od(cfg: ODUnion, *, deps: dict = {}) -> OriginDestinationSampler:
     return _od_registry[cfg.kind](cfg, deps)
 
 
 @register_od("idealized")
 def _make_uniform(cfg: ODSamplerIdealizedModel, deps):
     rng = deps["rng"]
-    return IdealizedODSampler(zones=cfg.zones, weights=cfg.weights, rng=rng)
+    return IdealizedODSampler(zones=cfg.zones, weights=(cfg.weights or None), rng=rng)
 
 
 @register_od("empirical")
@@ -170,7 +170,7 @@ def register_route_planner(kind: str):
     return deco
 
 
-def make_route_planner(cfg: RoutePlannerUnion, *, deps: dict) -> RoutePlanner:
+def make_route_planner(cfg: RoutePlannerUnion, *, deps: dict = {}) -> RoutePlanner:
     return _route_planner_registry[cfg.kind](cfg, deps)
 
 
@@ -201,7 +201,7 @@ def register_path_traverser(kind: str):
     return deco
 
 
-def make_path_traverser(cfg: RoutePlannerUnion, *, deps: dict) -> PathTraverser:
+def make_path_traverser(cfg: RoutePlannerUnion, *, deps: dict = {}) -> PathTraverser:
     return _path_traverser_registry[cfg.kind](cfg, deps)
 
 

@@ -78,5 +78,5 @@ class SimClock:
         dt = self._with_tz(self.to_wall(t), tz)
         return dt.hour
 
-    def dow_hour_at(self, t: float) -> tuple[int, int]:
-        return self.to_wall(t).weekday(), self.to_wall(t).hour
+    def dow_hour_at(self, t: float) -> dict[str, int]:
+        return {"dow": self.to_wall(t).weekday(), "hour": self.to_wall(t).hour}

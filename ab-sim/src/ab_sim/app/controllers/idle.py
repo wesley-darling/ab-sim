@@ -17,7 +17,7 @@ class IdleHandler:
         demand: DemandHandler,
         mechanics: Mechanics,
         clock: SimClock,
-        travel_time: TravelTimeService,
+        travel_time: TravelTimeService | None = None,
     ):
         self.world = world
         self.idle = idle
@@ -52,7 +52,7 @@ class IdleHandler:
             d.task_id += 1
 
         # Try snapping to target
-        snapped_target, _ = self.mechanics.space.snap(target, kind="vehicle")
+        snapped_target, _ = self.mechanics.od_sampler.snap(target, kind="vehicle")
 
         # build plan
         plan = self.mechanics.move_plan(d.loc, snapped_target, now, **self.clock.dow_hour_at(now))

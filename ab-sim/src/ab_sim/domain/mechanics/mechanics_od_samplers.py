@@ -1,5 +1,7 @@
 import math
 
+import numpy as np
+
 from ab_sim.app.protocols import OriginDestinationSampler
 from ab_sim.domain.entities.geography import NetworkGraph, Point, Segment
 
@@ -12,13 +14,30 @@ class IdealizedODSampler(OriginDestinationSampler):
         weights: list[float] | None = None,
         rng,
     ):
-        self.zones, self.rng, self.weights = zones, rng, weights
+        self.zones = list(zones)
+        self.rng, self.weights = rng, weights
+        self._p = None if weights is None else self._normalize_weights(weights, len(self.zones))
+
+    @staticmethod
+    def _normalize_weights(weights, n):
+        if weights is None:
+            return None  # uniform in Generator.choice
+        w = np.asarray(weights, dtype=float)
+        if w.shape != (n,):
+            raise ValueError(f"zone weights must have length {n}, got {w.shape[0]}")
+        if not np.isfinite(w).all():
+            bad = np.where(~np.isfinite(w))[0]
+            raise ValueError(f"zone weights must be finite; bad indices: {bad.tolist()} ")
+        s = w.sum()
+        if s <= 0:
+            raise ValueError("zone weights must sum to a positive value")
+        return w / s
 
     def _pick(self):
         if not self.weights:
             idx = self.rng.integers(0, len(self.zones))
         else:
-            idx = self.rng.choice(len(self.zones), p=self.weights)
+            idx = self.rng.choice(len(self.zones), p=self._p if self._p is not None else None)
         return self.zones[int(idx)]
 
     def _uniform(self, rect):

@@ -14,7 +14,6 @@ from ab_sim.domain.mechanics.mechanics_factory import build_mechanics
 
 # domain/policy/handlers you already have or will add
 from ab_sim.domain.state import WorldState
-from ab_sim.io.config import ScenarioConfig
 from ab_sim.io.kernel_logging import KernelLogging  # JSON logs
 from ab_sim.io.recorder import JsonlSink, Recorder
 from ab_sim.runtime.policy_factory import (
@@ -44,7 +43,7 @@ class App:
     fleet: FleetHandler
 
 
-def build(cfg: ScenarioConfig | Mapping, *, worker: int = 0, use_logging: bool = True) -> App:
+def build(cfg: ScenarioModel | Mapping, *, worker: int = 0, use_logging: bool = True) -> App:
     # 0) Validate config
     model = cfg if isinstance(cfg, ScenarioModel) else ScenarioModel.model_validate(cfg)
 
@@ -74,8 +73,8 @@ def build(cfg: ScenarioConfig | Mapping, *, worker: int = 0, use_logging: bool =
 
     # 3) World & policies
     world = WorldState(capacity=model.world.capacity, geo=model.world.geo)
-    matching_policy = make_matching_policy(model.matching)
-    dwell_policy = make_dwell_policy(model.dwell)
+    matching_policy = make_matching_policy(model.matching, world=world)
+    dwell_policy = make_dwell_policy(model.dwell, rng_registry=rng_registry)
     idle_policy = make_idle_policy(model.idle)
     pricing_policy = make_pricing_policy(model.pricing)
 
@@ -88,7 +87,12 @@ def build(cfg: ScenarioConfig | Mapping, *, worker: int = 0, use_logging: bool =
     demand = DemandHandler(world=world, mechanics=mechanics, rng=rng_registry.stream("demand"))
 
     idle = IdleHandler(
-        world=world, policy=idle_policy, demand=demand, travel_time=travel_time, mechanics=mechanics
+        world=world,
+        idle=idle_policy,
+        demand=demand,
+        travel_time=travel_time,
+        mechanics=mechanics,
+        clock=clock,
     )
 
     fleet = FleetHandler(world=world, rng=rng_registry.stream("supply"), mechanics=mechanics)

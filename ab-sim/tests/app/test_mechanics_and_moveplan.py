@@ -5,17 +5,16 @@ import pytest
 
 from ab_sim.app.build import build
 from ab_sim.app.protocols import Path, Point, Segment
+from ab_sim.config.models import MechanicsModel, ScenarioModel
 from ab_sim.domain.entities.driver import Driver
 from ab_sim.domain.entities.motion import MoveTask  # for compatibility checks
 from ab_sim.domain.mechanics.mechanics_core import Mechanics
 from ab_sim.domain.mechanics.mechanics_factory import (
-    GlobalSpeedSampler,
-    ManhattanRoutePlanner,
-    MechanicsConfig,
     build_mechanics,
 )
 from ab_sim.domain.mechanics.mechanics_path_traversers import PiecewiseConstSpeedTraverser
-from ab_sim.io.config import ScenarioConfig
+from ab_sim.domain.mechanics.mechanics_route_planners import ManhattanRoutePlanner
+from ab_sim.domain.mechanics.mechanics_speed_samplers import GlobalSpeedSampler
 from ab_sim.sim.rng import RNGRegistry
 
 # ---------- Fixtures
@@ -23,32 +22,34 @@ from ab_sim.sim.rng import RNGRegistry
 
 @pytest.fixture
 def mechanics_ideal_const10() -> Mechanics:
-    cfg = MechanicsConfig(
-        mode="idealized",
-        metric="euclidean",
-        zones=[(0.0, 0.0, 10_000.0, 10_000.0)],
-        speed_kind="constant",
-        base_mps=10.0,
-        seed=42,
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 42,
+            "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+            "route_planner": {"kind": "euclidean"},
+            "speed_sampler": {"kind": "global", "v_mps": 10.0},
+            "path_traverser": {"kind": "piecewise_const"},
+        }
     )
 
     reg = RNGRegistry(master_seed=123, scenario="test", worker=0)
-    return build_mechanics(cfg, rng_registry=reg)
+    return build_mechanics(mech_cfg, rng_registry=reg)
 
 
 @pytest.fixture
 def mechanics_ideal_const8() -> Mechanics:
-    cfg = MechanicsConfig(
-        mode="idealized",
-        metric="manhattan",
-        zones=[(0.0, 0.0, 10_000.0, 10_000.0)],
-        speed_kind="constant",
-        base_mps=8.0,
-        seed=99,
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 99,
+            "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+            "route_planner": {"kind": "manhattan"},
+            "speed_sampler": {"kind": "global", "v_mps": 8.0},
+            "path_traverser": {"kind": "piecewise_const"},
+        }
     )
 
     reg = RNGRegistry(master_seed=123, scenario="testB", worker=0)
-    return build_mechanics(cfg, rng_registry=reg)
+    return build_mechanics(mech_cfg, rng_registry=reg)
 
 
 # ---------- Core Mechanics / Traverser tests
@@ -56,9 +57,9 @@ def mechanics_ideal_const8() -> Mechanics:
 
 def test_euclidean_eta_equals_length_over_speed(mechanics_ideal_const10: Mechanics):
     m = mechanics_ideal_const10
-    a, b, t0 = Point(100.0, 200.0), Point(1100.0, 200.0), 0.0
+    a, b, t0_s = Point(100.0, 200.0), Point(1100.0, 200.0), 0.0
     L = math.hypot(b.x - a.x, b.y - a.y)
-    eta = m.eta(a, b, t0)
+    eta = m.eta_s(a, b, t0_s)
     assert abs(eta - (L / 10.0)) < 1e-6
 
 
@@ -81,7 +82,7 @@ def test_manhattan_router_two_segments_and_durations(mechanics_ideal_const8: Mec
     assert len(path.segments) == 2
     assert abs(path.total_length_m - (300.0 + 400.0)) < 1e-9
 
-    plan = m.mover.plan(path, t0, m.speed)
+    plan = m.path_traverser.plan(path, t0, m.speed_sampler)
     assert len(plan.tasks) == 2
     # each leg duration at 8 m/s
     assert abs(plan.tasks[0].end_t - (t0 + 300.0 / 8.0)) < 1e-6
@@ -106,23 +107,24 @@ def test_progress_events_monotone_and_ends_at_arrival(mechanics_ideal_const10: M
 
 
 def test_rng_registry_makes_od_sampling_deterministic():
-    cfg = MechanicsConfig(
-        mode="idealized",
-        metric="euclidean",
-        zones=[(0.0, 0.0, 10_000.0, 10_000.0)],
-        speed_kind="constant",
-        base_mps=9.0,
-        seed=7,
+    mech_cfg = MechanicsModel.model_validate(
+        {
+            "seed": 7,
+            "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+            "route_planner": {"kind": "euclidean"},
+            "speed_sampler": {"kind": "global", "v_mps": 9.0},
+            "path_traverser": {"kind": "piecewise_const"},
+        }
     )
 
     reg1 = RNGRegistry(master_seed=555, scenario="A", worker=0)
     reg2 = RNGRegistry(master_seed=555, scenario="A", worker=0)
-    m1 = build_mechanics(cfg, rng_registry=reg1)
-    m2 = build_mechanics(cfg, rng_registry=reg2)
+    m1 = build_mechanics(mech_cfg, rng_registry=reg1)
+    m2 = build_mechanics(mech_cfg, rng_registry=reg2)
 
     # draw a few origins/destinations — should be identical
-    pts1 = [m1.space.sample_origin(None) for _ in range(5)]
-    pts2 = [m2.space.sample_origin(None) for _ in range(5)]
+    pts1 = [m1.od_sampler.sample_origin(None) for _ in range(5)]
+    pts2 = [m2.od_sampler.sample_origin(None) for _ in range(5)]
     assert [(p.x, p.y) for p in pts1] == [(p.x, p.y) for p in pts2]
 
 
@@ -162,7 +164,7 @@ class _WalkDriveSpeed(GlobalSpeedSampler):
         self.walk = walk_mps
 
     def speed_mps(self, t: float, *, edge_id=None, **_):
-        return self.walk if edge_id is None else self.v
+        return self.walk if edge_id is None else self.v_mps
 
 
 def test_plan_with_walking_and_driving_segments():
@@ -193,24 +195,24 @@ def test_plan_with_walking_and_driving_segments():
 
 
 def test_mechanics_eta_constant_speed():
-    cfg = ScenarioConfig.model_validate(
+    cfg = ScenarioModel.model_validate(
         {
             "name": "test",
             "run_id": "t-1",
             "sim": {"epoch": [2025, 1, 1, 0, 0, 0], "seed": 1, "duration": 3600},
             "mechanics": {
-                "mode": "idealized",
-                "metric": "euclidean",
-                "speed_kind": "constant",
-                "base_mps": 10.0,
+                "od_sampler": {"kind": "idealized", "zones": [(0.0, 0.0, 10_000.0, 10_000.0)]},
+                "route_planner": {"kind": "euclidean"},
+                "speed_sampler": {"kind": "global", "v_mps": 10.0},
+                "path_traverser": {"kind": "piecewise_const"},
             },
         }
     )
     app = build(cfg)
-    mech = app["mechanics"]
+    mech = app.mechanics
     rng = random.Random(0)
-    a = mech.space.sample_origin(rng)
-    b = mech.space.sample_destination(rng)
-    L = mech.router.distance_m(a, b)
-    t = mech.eta(a, b, 0.0)
+    a = mech.od_sampler.sample_origin(rng)
+    b = mech.od_sampler.sample_destination(rng)
+    L = mech.route_planner.distance_m(a, b)
+    t = mech.eta_s(a, b, 0.0)
     assert abs(t - L / 10.0) < 1e-6
